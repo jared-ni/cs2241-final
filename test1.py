@@ -40,7 +40,7 @@ class Compressor:
     def compress_arr(self, arr: np.ndarray):
         arr = self.delta_encoding(arr)
         # print(arr)
-        print(f'{round((arr!=0).mean()*100)}%', end='\t')
+        print(f'{round((arr!=0).mean()*100, 2)}%', end='\t')
         # print(f'{self.quantization_factor*np.abs(arr).mean():.2f}', end='\t')
         # out = np.abs(arr).astype(np.uint8).reshape(self.height, self.width)
         # print(f'{round((out>0).mean()*100)}%', end='\t')
