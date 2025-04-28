@@ -2,10 +2,16 @@ import mmh3
 from bitarray import bitarray
 
 class BloomFilter:
-    def __init__(self, size, hash_count, bits: bitarray | None = None):
-        self.size = size
+    def __init__(self, bits: int | bitarray, hash_count: int):
         self.hash_count = hash_count
-        self.bit_array = bits if bits else bitarray([0] * size)
+        if isinstance(bits, int):
+            self.size = bits
+            self.bit_array = bitarray([0] * bits)
+        elif isinstance(bits, bitarray):
+            self.size = len(bits)
+            self.bit_array = bits
+        else:
+            raise Exception
 
     def add(self, element):
         for i in range(self.hash_count):

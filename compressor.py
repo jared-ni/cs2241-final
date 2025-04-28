@@ -1,113 +1,119 @@
 import numpy as np
 from PIL import Image
-from bitarray.util import int2ba
+from bitarray import bitarray
 from helper import *
 from bloom import BloomFilter
 from options import *
+from compressor_base import CompressorBase
+from typing import Any, Callable
 
 
-class Compressor:
+class Compressor(CompressorBase):
     def __init__(self,
-                 quantization_bits,
+                 image_options: ImageOptions,
+                 quantization_options: QuantizationOptions | None,
                  segment_options: SegmentOptions | None,
                  linear_regression_options: LinearRegressionOptions | None,
                  delta_encoding_options: DeltaEncodingOptions | None,
                  bloom_filter_options: BloomFilterOptions | None,
     ):
+        super().__init__()
+        
+        # Image settings
+        image_options.validate()
+        self.image_height = image_options.height
+        self.image_width = image_options.width
+
         # Quantization settings
-        self.quantization_bits = quantization_bits
-        self.quantization_max = 2**quantization_bits - 1
-        self.quantization_factor = 256 // 2**quantization_bits
+        if quantization_options:
+            quantization_options.validate()
+            self.quantization_bits = quantization_options.quantization_bits
+        else:
+            self.quantization_bits = 8
 
         # Segmenting settings
         if segment_options:
-            self.do_segment = True
+            segment_options.validate(self.image_height, self.image_width)
             self.segment_height = segment_options.height
             self.segment_width = segment_options.width
-            self.segment_size = self.segment_height * self.segment_width
         else:
-            self.do_segment = False
+            self.segment_height = self.image_height
+            self.segment_width = self.image_width
 
         # Linear regression settings
         if linear_regression_options:
+            linear_regression_options.validate()
             self.do_linear_regression = True
         else:
             self.do_linear_regression = False
         
         # Delta encoding settings
         if delta_encoding_options:
+            delta_encoding_options.validate()
             self.do_delta_encoding = True
             self.anchor_frequency = delta_encoding_options.anchor_frequency
-            self.anchor_count = self.segment_size // self.anchor_frequency
-            self.diff_count = self.segment_size - self.anchor_count
             self.smear_bits = delta_encoding_options.smear_bits
-            self.smear_max = 2**(self.smear_bits-1)-1
         else:
             self.do_delta_encoding = False
         
         # Bloom filter settings
         if bloom_filter_options:
+            bloom_filter_options.validate()
             self.do_bloom_filter = True
             ln_fpp = np.log(bloom_filter_options.fpp)
             ln2 = np.log(2)
-            self.bloom_bits_per_element = -ln_fpp / ln2**2
-            self.bloom_hash_count = round(-ln_fpp / ln2)
+            self.bloom_bits_per_element: float = -ln_fpp / ln2**2
+            self.bloom_hash_count: int = round(-ln_fpp / ln2)
         else:
             self.do_bloom_filter = False
 
+        # Set parameters derived from the ones above
+        self.set_dependent_parameters()
 
-    def compress_image(self, image_file, compressed_file):
+
+    def compress_image(self, image_file: str, compressed_file: str, log_file: str | None = None):
         # Array of pixels making up the image
         arr = np.array(Image.open(image_file))
-        height, width, channels = arr.shape
+        assert len(arr.shape) == 3
+        assert arr.shape[0] == self.image_height
+        assert arr.shape[1] == self.image_width
+        assert arr.shape[2] == 3
+        assert (0 <= arr).all() and (arr <= 255).all()
 
-        # `compressed` is the raw string of bits that will make up the compressed file
-        # We start by adding some metadata
-        compressed = (
-            int2ba(height, 16) + int2ba(width, 16) + int2ba(self.quantization_bits, 8) +
-            int2ba(int(self.do_segment), 1) + int2ba(int(self.do_linear_regression), 1) +
-            int2ba(int(self.do_delta_encoding), 1) + int2ba(int(self.do_bloom_filter), 1)
-        )
-        if self.do_segment:
-            compressed += int2ba(self.segment_height, 16) + int2ba(self.segment_width, 16)
+        self.compressed_bitarray = bitarray()
+        self.log_file = open(log_file, 'w') if log_file else None
+
+        # We start by adding some metadata to the compressed file
+        self.write(self.image_height, int2ba, 16, msg='Image height: ')
+        self.write(self.image_width, int2ba, 16, msg='Image width: ')
+        self.write(self.quantization_bits, int2ba, 4, msg='Quantization bits: ')
+        self.write(self.segment_height, int2ba, 16, msg='Segment height: ')
+        self.write(self.segment_width, int2ba, 16, msg='Segment width: ')
+        self.write(int(self.do_linear_regression), int2ba, 1, msg='Linear regression? ')
+        self.write(int(self.do_delta_encoding), int2ba, 1, msg='Delta encoding? ')
+        self.write(int(self.do_bloom_filter), int2ba, 1, msg='Bloom filter? ')
         if self.do_delta_encoding:
-            compressed += int2ba(self.anchor_frequency, 32) + int2ba(self.smear_bits, 8)
+            self.write(self.anchor_frequency, int2ba, 32, msg='Anchor frequency: ')
+            self.write(self.smear_bits, int2ba, 4, msg='Smear bits: ')
         if self.do_bloom_filter:
-            compressed += int2ba(self.bloom_hash_count, 8)
+            self.write(self.bloom_hash_count, int2ba, 8, msg='Bloom hash count: ')
 
-        # anchor_bits_needed: Number of bits needed to represent each non-delta-encoded value in image
-        # anchor_is_signed: Whether these values are signed or unsigned
-        if self.do_linear_regression:
-            # Linear regression produces residuals, which are signed and so require an extra bit
-            anchor_bits_needed = self.quantization_bits + 1
-            anchor_is_signed = True
-        else:
-            anchor_bits_needed = self.quantization_bits
-            anchor_is_signed = False
-        # Add this metadata
-        compressed += int2ba(anchor_bits_needed, 7) + int2ba(int(anchor_is_signed), 1)
-
-        # bloom_bits_needed: Number of bits needed to represent each value in the Bloom filter step
-        # bloom_is_signed: Whether these values are signed or unsigned
         if self.do_delta_encoding:
-            # If we use delta encoding, the Bloom filter step sees the smeared differences
-            bloom_bits_needed = self.smear_bits
-            bloom_is_signed = True
-        else:
-            # If we don't use delta encoding, every value is a non-delta-encoded value
-            bloom_bits_needed = anchor_bits_needed
-            bloom_is_signed = anchor_is_signed
-        # Add this metadata
-        compressed += int2ba(bloom_bits_needed, 7) + int2ba(int(bloom_is_signed), 1)
+            # Mask indicating locations of all the anchors
+            anchor_mask = np.zeros(self.segment_size, dtype=bool)
+            anchor_mask[::self.anchor_frequency] = 1
         
         # Quantize and segment the image
         arr = self.quantize(arr)
-        segments = self.segment(arr) if self.do_segment else [arr]
+        segments = self.segment(arr)
 
-        for segment in segments:
-            red = segment[:, 0].flatten()
-            green = segment[:, 1].flatten()
-            blue = segment[:, 2].flatten()
+        for segment_idx, segment in enumerate(segments):
+            self.log_write(f'\n\n\nSEGMENT {segment_idx}\n')
+            self.log_indent()
+
+            red = segment[:, 0]
+            green = segment[:, 1]
+            blue = segment[:, 2]
 
             # Linear regression
             if self.do_linear_regression:
@@ -116,12 +122,15 @@ class Compressor:
                 green, green_beta0, green_beta1 = self.linear_regression(red, green)
                 blue, blue_beta0, blue_beta1 = self.linear_regression(red, blue)
                 # Add regression coefficients and intercepts to the compressed file
-                compressed += (
-                    float2ba(green_beta0) + float2ba(green_beta1) +
-                    float2ba(blue_beta0) + float2ba(blue_beta1)
-                )
+                self.write(green_beta0, float2ba, 32, True, msg='Green beta0: ')
+                self.write(green_beta1, float2ba, 32, True, msg='Green beta1: ')
+                self.write(blue_beta0, float2ba, 32, True, msg='Blue beta0: ')
+                self.write(blue_beta1, float2ba, 32, True, msg='Blue beta1: ')
             
-            for channel in (red, green, blue):
+            for channel, channel_name in zip((red, green, blue), ('RED', 'GREEN', 'BLUE')):
+                self.log_write(f'\n{channel_name} CHANNEL\n')
+                self.log_indent()
+
                 # Delta encoding
                 if self.do_delta_encoding:
                     # Delta-encode and smear each channel
@@ -129,15 +138,14 @@ class Compressor:
                     delta_arr = self.smear(delta_arr)
 
                     # Add anchors to compressed file
-                    anchors = delta_arr[::self.anchor_frequency]
-                    compressed += intarr2ba(anchors, anchor_bits_needed, signed=anchor_is_signed)
+                    anchors = delta_arr[anchor_mask]
+                    self.write(anchors, intarr2ba, self.bits_per_anchor_val, self.is_signed_anchor,
+                               msg='Anchors:\n')
+                    self.log_write()
 
                     # Everything that is not an anchor is a difference ->
                     # handle these in next step
-                    diff_mask = np.ones_like(delta_arr)
-                    diff_mask[::self.anchor_frequency] = 0
-                    diffs = delta_arr[diff_mask]
-                    sparse_arr = diffs
+                    sparse_arr = delta_arr[~anchor_mask]
 
                 else:  # No delta encoding -> continue to next step
                     sparse_arr = channel
@@ -145,21 +153,59 @@ class Compressor:
                 # Bloom filters
                 if self.do_bloom_filter:
                     # Create Bloom filters
-                    bloom_filters = self.bloom_filter(sparse_arr)
+                    bloom_filters, mode = self.bloom_filter(sparse_arr)
+                    # The mode from sparse_arr
+                    self.write(mode, int2ba, self.bits_per_bloom_val, self.is_signed_bloom,
+                               msg='Mode: ')
+                    # The number of Bloom filters used
+                    self.write(len(bloom_filters), int2ba, self.bits_per_bloom_val,
+                               msg='Number of Bloom filters: ')
                     for num, bloom_filter in bloom_filters.items():
+                        self.log_write('BLOOM FILTER')
+                        self.log_indent()
                         # The value the Bloom filter represents
-                        compressed += int2ba(num, bloom_bits_needed, signed=bloom_is_signed)
-                        # The length of the Bloom filter
-                        compressed += int2ba(len(bloom_filter.bit_array), 32)
+                        self.write(num, int2ba, self.bits_per_bloom_val, self.is_signed_bloom,
+                                   msg='Bloom filter value: ')
+                        # The number of bits in the Bloom filter
+                        self.write(len(bloom_filter.bit_array), int2ba, 32,
+                                   msg='Number of bits in Bloom filter: ')
                         # The Bloom filter
-                        compressed += bloom_filter.bit_array
+                        self.write(bloom_filter.bit_array,
+                                   msg='Bloom filter:\n')
+                        self.log_deindent()
 
                 else:  # No Bloom filters -> directly write the sparse array
-                    compressed += intarr2ba(sparse_arr, bloom_bits_needed, signed=bloom_is_signed)
+                    # Sparse array
+                    self.write(sparse_arr, intarr2ba, self.bits_per_bloom_val, self.is_signed_bloom,
+                               msg='Array:\n')
+                
+                self.log_deindent()
+            
+            self.log_deindent()
 
         with open(compressed_file, 'wb') as f:
-            compressed.tofile(f)
+            self.compressed_bitarray.tofile(f)
+        
+        if self.log_file:
+            self.log_file.close()
 
+    def write(self,
+              val: Any,
+              func: Callable | None = None,
+              length: int | None = None,
+              signed: bool = False,
+              msg: Any = None):
+        """
+        Use `func` to convert `val` into a bitarray and write to the compressed file.
+        If no `func` provided, then `val` must already be a bitarray.
+        `val` (or if `val` is a list, each individual element of `val`) should be represented with `length` bits
+        and be treated as either signed or unsigned depending on `signed`.
+        If `msg` is provided and there is a log file, write `msg` followed by `val` to the log file.
+        """
+        self.compressed_bitarray += func(val, length, signed) if func else val
+        if msg is not None:
+            str_val = self.log_as_str(val)
+            self.log_write(str(msg) + str_val)
 
     def quantize(self, arr: np.ndarray) -> np.ndarray:
         """
@@ -218,18 +264,18 @@ class Compressor:
         - beta0: float -- linear regression intercept
         - beta1: float -- linear regression coefficient
         """
-        x = x.astype(np.float64)
-        y = y.astype(np.float64)
+        x = x.astype(float)
+        y = y.astype(float)
         xbar = x.mean()
         ybar = y.mean()
-        beta1: np.float64 = ((x-xbar)*(y-ybar)).sum() / ((x-xbar)**2).sum()
-        beta0: np.float64 = ybar - beta1 * xbar
+        beta1: float = ((x-xbar)*(y-ybar)).sum() / ((x-xbar)**2).sum()
+        beta0: float = ybar - beta1 * xbar
         yhat = beta0 + beta1 * x
-        yhat = yhat.clip(0, self.quantization_max)
+        yhat = yhat.clip(0, self.quantization_max).astype(int)
         res = (y - yhat).astype(int)
         return res, beta0, beta1
 
-    def delta_encoding(self, arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def delta_encoding(self, arr: np.ndarray) -> np.ndarray:
         """
         Input:
         - arr: np.ndarray(segment_size)
@@ -255,7 +301,7 @@ class Compressor:
         Happens ONLY AFTER DELTA-ENCODING. 
 
         """
-        smeared_arr = np.zeros_like(diff_arr)
+        smeared_arr = np.zeros(self.segment_size, dtype=int)
         carry = 0
 
         for i in range(diff_arr.shape[0]):
@@ -278,7 +324,7 @@ class Compressor:
         # thus we use smearing to reduce the range of neg/pos numbers
     
 
-    def bloom_filter(self, sparse_arr: np.ndarray):
+    def bloom_filter(self, sparse_arr: np.ndarray) -> tuple[dict[int, BloomFilter], int]:
         """
         Input:
         - arr: np.ndarray
@@ -317,20 +363,18 @@ class Compressor:
             for index in num_to_indices[num]:
                 bloom_filters[num].add(index)           
 
-        return bloom_filters
+        return bloom_filters, max_num
 
         # assume dictionary: 
         # {1: bloomFilter, 2: bloomFilter, 3: bloomFilter, 4: bloomFilter}
 
 
-quantization_bits = 4
-segment_options = SegmentOptions(height=64, width=64)
-linear_regression_options = LinearRegressionOptions()
-delta_encoding_options = DeltaEncodingOptions(anchor_frequency=100, smear_bits=4)
-bloom_filter_options = BloomFilterOptions(fpp=0.01)
-compressor = Compressor(quantization_bits,
-                        segment_options,
-                        linear_regression_options,
-                        delta_encoding_options,
-                        bloom_filter_options)
+compressor = Compressor(
+    image_options=ImageOptions(height=256, width=256),
+    quantization_options=QuantizationOptions(quantization_bits=2),
+    segment_options=SegmentOptions(height=64, width=64),
+    linear_regression_options=LinearRegressionOptions(),
+    delta_encoding_options=DeltaEncodingOptions(anchor_frequency=20, smear_bits=2),
+    bloom_filter_options=BloomFilterOptions(fpp=0.0001)
+)
 compressor.compress_image('imagenet-sample-images-resized/n01443537_goldfish.JPEG', 'compressed')
