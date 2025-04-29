@@ -282,7 +282,7 @@ if __name__ == "__main__":
     dummy_image_path = "imagenet-sample-images-resized/n01443537_goldfish.JPEG" # Or your JPEG path
 
     img_options = ImageOptions(height=img_height, width=img_width)
-    jpeg_options = JpegOptions(quality=50, subsampling_mode='4:2:0')
+    jpeg_options = JpegOptions(quality=15, subsampling_mode='4:2:0')
 
     print(f"Running JPEG compression with Entropy Coding...")
     # *** Use the final class name ***

@@ -24,6 +24,8 @@ class CompressorBase:
         self.indent = 0
         np.set_printoptions(threshold=np.inf)
 
+        self.log_file: Any = None
+
 
     def set_dependent_parameters(self):
         self.quantization_max: int = 2**self.quantization_bits - 1
@@ -75,3 +77,20 @@ class CompressorBase:
     def log_deindent(self):
         """Decrease the indent in the log file."""
         self.indent -= 1
+
+    def set_log_file(self, log_file_path: str | None):
+        """Sets up the log file. Closes existing file if open."""
+        if self.log_file: # Close existing log file if open
+            try:
+                self.log_file.close()
+            except Exception as e:
+                print(f"Warning: Error closing previous log file: {e}") # Non-fatal
+        # Open new log file if path provided
+        if log_file_path:
+            try:
+                self.log_file = open(log_file_path, 'w')
+            except IOError as e:
+                print(f"Warning: Could not open log file {log_file_path}: {e}")
+                self.log_file = None # Set back to None if opening failed
+        else:
+            self.log_file = None # Ensure it's None if no path is given

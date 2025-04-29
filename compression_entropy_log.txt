@@ -4,26 +4,26 @@
 
 Processing Y Channel...
   Generating Symbols (DC diff + RLE AC)...
-  Generated 9342 symbols.
+  Generated 4198 symbols.
 
 Processing CB Channel...
   Generating Symbols (DC diff + RLE AC)...
-  Generated 801 symbols.
+  Generated 579 symbols.
 
 Processing CR Channel...
   Generating Symbols (DC diff + RLE AC)...
-  Generated 746 symbols.
+  Generated 557 symbols.
 
 --- Building Huffman Codes & Encoding Data ---
 Encoding Y Channel...
-  Generated 196 Huffman codes.
-  Encoded bitstream size: 47178 bits
+  Generated 93 Huffman codes.
+  Encoded bitstream size: 18208 bits
 Encoding CB Channel...
-  Generated 56 Huffman codes.
-  Encoded bitstream size: 3088 bits
+  Generated 24 Huffman codes.
+  Encoded bitstream size: 1428 bits
 Encoding CR Channel...
-  Generated 42 Huffman codes.
-  Encoded bitstream size: 2683 bits
+  Generated 17 Huffman codes.
+  Encoded bitstream size: 1239 bits
 
 --- Saving Compressed Data Structure (Pickle) ---
 Saved data to compressed_jpeg_with_entropy.pkl
