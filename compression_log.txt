@@ -1,0 +1,36 @@
+--- Starting JPEG-Style Compression Simulation ---
+Input image: imagenet-sample-images-resized/n01443537_goldfish.JPEG ((256, 256, 3))
+Output file (pickle): compressed_jpeg_style_data.pkl
+Quality: 50, Subsampling: 4:2:0
+--------------------
+  Converting RGB to YCrCb...
+  Color conversion done.
+  Performing Chroma Subsampling: 4:2:0
+  Cb subsampled shape: (128, 128)
+  Cr subsampled shape: (128, 128)
+
+--- Processing Channels (Pad, Block, DCT, Quantize, Zigzag) ---
+
+Processing Y Channel...
+  Padded channel from 256x256 to 256x256
+  Split channel into 1024 blocks (32x32 grid).
+  Processing block 1/1024...
+  Processing block 1001/1024...
+  Finished processing Y channel.
+
+Processing CB Channel...
+  Padded channel from 128x128 to 128x128
+  Split channel into 256 blocks (16x16 grid).
+  Processing block 1/256...
+  Finished processing CB channel.
+
+Processing CR Channel...
+  Padded channel from 128x128 to 128x128
+  Split channel into 256 blocks (16x16 grid).
+  Processing block 1/256...
+  Finished processing CR channel.
+
+--- Saving Compressed Data Structure (Pickle) ---
+Successfully saved data to compressed_jpeg_style_data.pkl
+
+--- JPEG-Style Compression Simulation Finished ---
