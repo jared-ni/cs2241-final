@@ -209,10 +209,10 @@ class Compressor(CompressorBase):
         else:
             self.compressed_bitarray = bitarray('0') + self.compressed_bitarray
 
-        # if self.do_huffman:
-        #     self.compressed_bitarray = bitarray('1') + int2ba(self.huffman_group_size, 8) + self.huffman(self.compressed_bitarray)
-        # else:
-        #     self.compressed_bitarray = bitarray('0') + self.compressed_bitarray
+        if self.do_huffman:
+            self.compressed_bitarray = bitarray('1') + int2ba(self.huffman_group_size, 8) + self.huffman(self.compressed_bitarray)
+        else:
+            self.compressed_bitarray = bitarray('0') + self.compressed_bitarray
 
         # Write compressed file to disk
         with open(compressed_file, 'wb') as f:
