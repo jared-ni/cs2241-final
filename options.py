@@ -57,3 +57,19 @@ class BloomFilterOptions:
     def validate(self):
         assert isinstance(self.fpp, float)
         assert 0 < self.fpp and self.fpp < 1
+
+@dataclass
+class LZWOptions:
+    bits_per_val: int
+
+    def validate(self):
+        assert isinstance(self.bits_per_val, int)
+        assert 1 <= self.bits_per_val and self.bits_per_val <= 255
+
+@dataclass
+class HuffmanOptions:
+    group_size: int
+    
+    def validate(self):
+        assert isinstance(self.group_size, int)
+        assert 1 <= self.group_size and self.group_size <= 255
