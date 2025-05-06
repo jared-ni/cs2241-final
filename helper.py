@@ -2,7 +2,7 @@ from bitarray import bitarray
 import bitarray.util as bitarray_util
 import struct
 import numpy as np
-from typing import Literal
+from typing import Literal, Iterable
 
 def int2ba(value: int, length: int, signed: bool = False):
     """Convert the given int to a bitarray"""
@@ -23,7 +23,7 @@ def ba2float(bits: bitarray, length: Literal[32] = 32, signed: Literal[True] = T
     """Convert the given bitarray to a 32-bit float"""
     return struct.unpack('>f', bits.tobytes())[0]
 
-def intarr2ba(arr: np.ndarray, length: int, signed: bool = False) -> bitarray:
+def intarr2ba(arr: Iterable[int], length: int, signed: bool = False) -> bitarray:
     """
     Convert the given integer array to a bitarray.
     Each integer is represented using `length` bits and may be signed or unsigned.
