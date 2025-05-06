@@ -50,8 +50,8 @@ class BloomierOptions:
 
 @dataclass
 class HuffmanOptions:
-    group_size: int
+    symbol_size: int
     
     def validate(self):
-        assert isinstance(self.group_size, int)
-        assert 1 <= self.group_size and self.group_size <= 255
+        assert isinstance(self.symbol_size, int)
+        assert 1 <= self.symbol_size and self.symbol_size <= 255

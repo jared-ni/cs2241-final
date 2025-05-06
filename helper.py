@@ -42,3 +42,56 @@ def ba2intarr(bits: bitarray, length: int, signed: bool = False) -> np.ndarray:
     for i in range(0, len(bits), length):
         arr.append(ba2int(bits[i:i+length], None, signed))
     return np.array(arr)
+
+def ba2tuple(bits: bitarray, length: int, signed: bool = False) -> np.ndarray:
+    """
+    Convert the given bitarray to an integer tuple.
+    Each integer is represented using `length` bits and may be signed or unsigned.
+    """
+    return tuple(ba2intarr(bits, length, signed))
+
+class Node:
+    def __init__(self, freq=None, symbol=None, left=None, right=None):
+        self.freq = freq
+        self.symbol = symbol
+        self.left = left
+        self.right = right
+    def __lt__(self, other):
+        return self.freq < other.freq
+    
+def tree2ba(node: Node, length: None = None, signed: None = None) -> bitarray:
+    """
+    Convert the given Huffman tree to a bitarray.
+    Each node's symbol is represented using `length` bits.
+    """
+    def _tree2ba(node: Node, bits: bitarray):
+        if node.symbol is not None:
+            # Leaf node -> write symbol
+            bits += bitarray('1') + bitarray(node.symbol)
+        else:
+            # Internal node -> recursively write child nodes
+            bits += bitarray('0')
+            _tree2ba(node.left, bits)
+            _tree2ba(node.right, bits)
+    bits = bitarray()
+    _tree2ba(node, bits)
+    return bits
+
+def ba2tree(bits: bitarray, length: int, signed: None = None) -> Node:
+    """
+    Convert the given bitarray to a Huffman tree.
+    Each node's symbol is represented using `length` bits.
+    """
+    def _ba2tree(pos: int):
+        is_leaf = bits[pos]
+        pos += 1
+        if is_leaf:
+            symbol = bits[pos : pos+length].to01()
+            pos += length
+            return Node(None, symbol, None, None), pos
+        else:
+            left, pos = _ba2tree(pos)
+            right, pos = _ba2tree(pos)
+            return Node(None, None, left, right), pos
+    node, _ = _ba2tree(0)
+    return node

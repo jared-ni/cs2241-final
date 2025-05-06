@@ -6,7 +6,7 @@ import networkx as nx
 from bitarray import bitarray
 
 class BloomierFilter:
-    def __init__(self, m: int, k: int, q: int):
+    def __init__(self, m: int, k: int, q: int, table: np.ndarray | None = None):
         """
         Immutable Bloomier Filter that exactly follows the construction from Chazelle et al. (2004).
 
@@ -14,11 +14,12 @@ class BloomierFilter:
             m (int): Number of table entries
             k (int): Number of hash functions
             q (int): Number of bits per value (bitwidth)
+            table (optional np.ndarray): Provide initial values with which to fill the filter
         """
         self.m = m
         self.k = k
         self.q = q
-        self.table = np.zeros((m, q), dtype=np.uint8)
+        self.table = np.zeros((m, q), dtype=np.uint8) if table is None else table
         self.hash_seed = 7
 
     def _hashes(self, key: int) -> Tuple[List[int], np.ndarray]:

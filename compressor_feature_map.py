@@ -47,7 +47,7 @@ class FeatureMapCompressor(FeatureMapCompressorBase):
             self.do_bloomier = True
             self.bloomier_slots_per_key = bloomier_options.slots_per_key
             self.bloomier_hash_count = bloomier_options.hash_count
-            self.bloomier_bits_per_value: int = round(np.log2(self.bloomier_hash_count / bloomier_options.fpp))
+            self.bloomier_bits_per_slot: int = round(np.log2(self.bloomier_hash_count / bloomier_options.fpp))
         else:
             self.do_bloomier = False
 
@@ -58,7 +58,7 @@ class FeatureMapCompressor(FeatureMapCompressorBase):
         if huffman_options:
             huffman_options.validate()
             self.do_huffman = True
-            self.huffman_group_size = huffman_options.group_size
+            self.huffman_symbol_size = huffman_options.symbol_size
         else:
             self.do_huffman = False
 
@@ -72,9 +72,6 @@ class FeatureMapCompressor(FeatureMapCompressorBase):
         self.log_file = open(log_file, 'w') if log_file else None
         
         # We start by adding some metadata to the compressed file
-        self.write(int(self.do_huffman), int2ba, 8)
-        if self.do_huffman:
-            self.write(self.huffman_group_size, int2ba, 8)
         self.write(len(self.feature_map_shape), int2ba, 8, msg='Feature map shape, # dimensions: ')
         self.write(self.feature_map_shape, intarr2ba, 16, msg='Feature map shape: ')
         self.write(self.feature_map_max_val, float2ba, 32, msg='Feature map max val: ')
@@ -86,9 +83,8 @@ class FeatureMapCompressor(FeatureMapCompressorBase):
             self.write(self.cm_width, int2ba, 16, msg='Count Min width: ')
             self.write(self.cm_depth, int2ba, 8, msg='Count Min depth: ')
         if self.do_bloomier:
-            self.write(self.bloomier_slots_per_key, float2ba, 32, msg='Bloomier slots per key: ')
             self.write(self.bloomier_hash_count, int2ba, 8, msg='Bloomier hash count: ')
-            self.write(self.bloomier_bits_per_value, int2ba, 8, msg='Bloomier bits per value: ')
+            self.write(self.bloomier_bits_per_slot, int2ba, 8, msg='Bloomier bits per value: ')
         self.log_write()
 
         # Get indices and values of the nonzero entries in feature map
@@ -96,29 +92,52 @@ class FeatureMapCompressor(FeatureMapCompressorBase):
         # Quantize
         values = self.quantize(values)
         
+        # Count Min sketch with Bloom filters
         if self.do_count_min:
             bloom, sketch = self.get_count_min(indices, values)
-            sketch_arr = sketch.count.flatten()
-            bits_per_val = int(np.ceil(np.log2(sketch_arr.max())))
-            self.write(len(bloom.bit_array), int2ba, 16, msg='Bloom filter length: ')
+            sketch = sketch.flatten()
+            bits_per_val = int(np.ceil(np.log2(sketch.max())))
+            self.write(len(bloom), int2ba, 16, msg='Bloom filter length: ')
             self.write(bits_per_val, int2ba, 8, msg='Bits per entry in Count Min sketch: ')
-            self.write(bloom.bit_array, msg='\nBloom filter:\n')
-            self.write(sketch_arr, intarr2ba, bits_per_val, msg='\nCount Min sketch:\n')
+            self.write(bloom, msg='\nBloom filter:\n')
+            self.write(sketch, intarr2ba, bits_per_val, msg='\nCount Min sketch:\n')
 
+        # Bloomier filter
         elif self.do_bloomier:
+            self.bloomier_num_slots = round(indices.shape[0] * self.bloomier_slots_per_key)
+            self.write(self.bloomier_num_slots, int2ba, 16, msg='Bloomier number of slots: ')
             bloomier = self.get_bloomier(indices, values)
             self.write(bloomier.flatten(), intarr2ba, 1, msg='Bloomier filter:\n')
         
+        # Dictionary of nonzero elements
         else:
             num_elts = len(values)
             idx_num_bits = int(np.ceil(np.log2(indices.max())))
             self.write(num_elts, int2ba, 32, msg='Number of nonzero elements: ')
-            self.write(idx_num_bits, int2ba, 32, msg='Bits to store each index: ')
+            self.write(idx_num_bits, int2ba, 8, msg='Bits to store each index: ')
             self.write(indices, intarr2ba, idx_num_bits, msg='\nIndices of nonzero elments:\n')
             self.write(values, intarr2ba, self.quantization_bits, msg='\nValues of nonzero elments:\n')
 
+        self.log_write('\n\n----------------------------------------------------------------\n')
+
+        # Get what has already been written to compressed file, clear the compressed file,
+        # and start fresh by writing whether Huffman encoding is to be used
+        file = self.get_file()
+        self.clear_file()
+        self.write(int(self.do_huffman), int2ba, 8, msg='Huffman encoding? ')
+        # Do Huffman coding on the file, if indicated
         if self.do_huffman:
-            self.compressed_bitarray = self.huffman(self.compressed_bitarray)
+            num_padding_bits, tree, encoded = self.huffman(file)
+            tree_bitarray = tree2ba(tree)
+            self.write(self.huffman_symbol_size, int2ba, 8, msg='Huffman symbol size: ')
+            self.write(num_padding_bits, int2ba, 8, msg='Number of padding bits: ')
+            self.write(len(tree_bitarray), int2ba, 16, msg='Number of bits in Huffman tree: ')
+            self.write(len(encoded), int2ba, 32, msg='Number of bits in Huffman encoding: ')
+            self.write(tree_bitarray, msg='\nHuffman tree as bits:\n')
+            self.write(encoded, msg='\nHuffman encoding:\n')
+        else:
+            # Simply write file back
+            self.write(file, msg='\nRaw file contents:\n')
 
         # Write compressed file to disk
         with open(compressed_file, 'wb') as f:
@@ -156,7 +175,7 @@ class FeatureMapCompressor(FeatureMapCompressorBase):
         for i, v in zip(indices, values):
             sketch.update(i, v)
 
-        return bloom, sketch
+        return bloom.bit_array, sketch.table
 
     def get_bloomier(self, indices: np.ndarray, values: np.ndarray):
         """
@@ -171,22 +190,19 @@ class FeatureMapCompressor(FeatureMapCompressorBase):
                 - bloomier_filter: The Bloomier filter data structure
                 - metadata: Additional information needed for decompression
         """
-        m = round(indices.shape[0] * self.bloomier_slots_per_key)
         # Initialize the Bloomier filter
-        bloomier = BloomierFilter(m=m, k=self.bloomier_hash_count, q=self.bloomier_bits_per_value)
+        bloomier = BloomierFilter(m=self.bloomier_num_slots,
+                                  k=self.bloomier_hash_count,
+                                  q=self.bloomier_bits_per_slot)
         # Create a dictionary mapping indices to values
         assignments = {int(idx): int(val) for idx, val in zip(indices, values)}
         # Build the filter
         bloomier.build(assignments)
-        # Return the filter and metadata
+        # Return the filter
         return bloomier.table
 
-    def huffman(self, bits: bitarray) -> bitarray:
-        class Node(namedtuple("Node", ["freq", "symbol", "left", "right"])):
-            def __lt__(self, other):
-                return self.freq < other.freq
-            
-        def build_codes(node, prefix=bitarray(), codebook: dict[str, bitarray] = {}):
+    def huffman(self, bits: bitarray):
+        def build_codes(node: Node, prefix=bitarray(), codebook: dict[bitarray, bitarray] = {}):
             if node.symbol is not None:
                 codebook[node.symbol] = prefix
             else:
@@ -194,13 +210,13 @@ class FeatureMapCompressor(FeatureMapCompressorBase):
                 build_codes(node.right, prefix + bitarray('1'), codebook)
             return codebook
 
-        remainder = len(bits) % self.huffman_group_size
+        remainder = len(bits) % self.huffman_symbol_size
         if remainder == 0:
-            padding_bits = 0
+            num_padding_bits = 0
         else:
-            padding_bits = self.huffman_group_size - remainder
-        bits_padded = bits.to01() + '0'*padding_bits
-        data = [bits_padded[i : i+self.huffman_group_size] for i in range(0, len(bits_padded), self.huffman_group_size)]
+            num_padding_bits = self.huffman_symbol_size - remainder
+        bits_padded = bits.to01() + '0'*num_padding_bits
+        data = [bits_padded[i : i+self.huffman_symbol_size] for i in range(0, len(bits_padded), self.huffman_symbol_size)]
         frequency = Counter(data)
         heap = [Node(freq, sym, None, None) for sym, freq in frequency.items()]
         heapq.heapify(heap)
@@ -214,10 +230,7 @@ class FeatureMapCompressor(FeatureMapCompressorBase):
         encoded = bitarray()
         for symbol in data:
             encoded.extend(codebook[symbol])
-        codebook_bits = bitarray()
-        for symbol, code in codebook.items():
-            codebook_bits += bitarray(symbol) + code
-        return int2ba(padding_bits, 8) + codebook_bits + encoded
+        return num_padding_bits, tree, encoded
     
     def write(self,
               val: Any,
@@ -237,12 +250,18 @@ class FeatureMapCompressor(FeatureMapCompressorBase):
             str_val = self.log_as_str(val)
             self.log_write(str(msg) + str_val)
 
+    def get_file(self):
+        return self.compressed_bitarray.copy()
+    
+    def clear_file(self):
+        self.compressed_bitarray.clear()
+
 
 compressor = FeatureMapCompressor(
     feature_map_options=FeatureMapOptions(shape=(1,4096)),
     quantization_options=QuantizationOptions(quantization_bits=8),
     # count_min_options=CountMinOptions(bloom_fpp=0.01, cm_epsilon=0.01, cm_delta=0.001),
-    bloomier_options=BloomierOptions(fpp=0.01, slots_per_key=1.3, hash_count=3),
-    # huffman_options=HuffmanOptions(group_size=4),
+    # bloomier_options=BloomierOptions(fpp=0.01, slots_per_key=1.3, hash_count=3),
+    huffman_options=HuffmanOptions(symbol_size=4),
 )
 compressor.compress_feature_map('feature_vector_nparray_4096.npy', 'compressed', 'log_compressor.txt')
