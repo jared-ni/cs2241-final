@@ -4,7 +4,6 @@ from typing import Any
 
 class FeatureMapCompressorBase:
     def __init__(self):
-        self.indent = 0
         np.set_printoptions(threshold=np.inf)
         self.log_file: Any = None
 

@@ -13,9 +13,11 @@ from math import prod
 class FeatureMapDecompressor(FeatureMapCompressorBase):
     def __init__(self):
         super().__init__()
-        self.pos = 0
 
     def decompress_image(self, compressed_file: str, output_file: str, log_file: str | None = None):
+        self.pos = 0
+        self.indent = 0
+
         self.compressed_bitarray = bitarray()
         with open(compressed_file, 'rb') as f:
             self.compressed_bitarray.fromfile(f)
@@ -49,7 +51,7 @@ class FeatureMapDecompressor(FeatureMapCompressorBase):
             self.cm_depth = self.read(8, ba2int, msg='Count Min depth: ')
         if self.do_bloomier:
             self.bloomier_hash_count = self.read(8, ba2int, msg='Bloomier hash count: ')
-            self.bloomier_bits_per_slot = self.read(8, ba2int, msg='Bloomier bits per slot: ')
+            self.bloomier_second_table = self.read(8, ba2int, msg='Bloomier second table? ')
         self.log_write()
 
         # Total number of entries in feature map across all dimensions
@@ -57,21 +59,33 @@ class FeatureMapDecompressor(FeatureMapCompressorBase):
 
         # Count Min sketch with Bloom filters
         if self.do_count_min:
-            bloom_len = self.read(16, ba2int, msg='Bloom filter length: ')
+            if self.bloom_hash_count > 0:
+                bloom_len = self.read(16, ba2int, msg='Bloom filter length: ')
+                bloom = self.read(bloom_len, msg='Bloom filter:\n')
+                self.log_write()
+            else:
+                bloom = None
             bits_per_val = self.read(8, ba2int, msg='Bits per entry in Count Min sketch: ')
-            bloom = self.read(bloom_len, msg='\nBloom filter:\n')
             sketch_bits = self.cm_width * self.cm_depth * bits_per_val
-            sketch = self.read(sketch_bits, ba2intarr, bits_per_val, msg='\nCount Min sketch:\n')
+            sketch = self.read(sketch_bits, ba2intarr, bits_per_val, msg='Count Min sketch:\n')
             sketch = sketch.reshape(self.cm_depth, self.cm_width)
             arr = self.count_min_undo(bloom, sketch)
 
         # Bloomier filter
         elif self.do_bloomier:
             self.bloomier_num_slots = self.read(16, ba2int, msg='Bloomier number of slots: ')
-            num_bits = self.bloomier_num_slots * self.bloomier_bits_per_slot
-            bloomier = self.read(num_bits, ba2intarr, 1, msg='Bloomier filter:\n')
-            bloomier = bloomier.reshape(self.bloomier_num_slots, self.bloomier_bits_per_slot)
-            arr = self.bloomier_undo(bloomier)
+            self.bloomier_bits_per_slot = self.read(8, ba2int, msg='Bloomier bits per slot: ')
+            max_val = self.read(max(8, self.quantization_bits), ba2int, msg='Bloomier max val: ')
+            hash_seed = self.read(16, ba2int, msg='Bloomier hash seed: ')
+            num_bits1 = self.bloomier_num_slots * self.bloomier_bits_per_slot
+            num_bits2 = self.bloomier_num_slots * self.quantization_bits
+            table1 = self.read(num_bits1, msg='Bloomier filter table 1:\n')
+            if self.bloomier_second_table:
+                table2 = self.read(num_bits2, ba2intarr, self.quantization_bits,
+                                   msg='\nBloomier filter table 2:\n')
+            else:
+                table2 = None
+            arr = self.bloomier_undo(table1, table2, max_val, hash_seed)
         
         # Dictionary of nonzero elements
         else:
@@ -98,23 +112,38 @@ class FeatureMapDecompressor(FeatureMapCompressorBase):
         target_max_val = 2**self.quantization_bits - 1
         return arr * self.feature_map_max_val / target_max_val
     
-    def count_min_undo(self, bloom_table: np.ndarray, sketch_table: np.ndarray):
-        bloom = BloomFilter(bloom_table, self.bloom_hash_count)
+    def count_min_undo(self, bloom_table: np.ndarray, sketch_table: np.ndarray) -> np.ndarray:
+        if bloom_table is not None:
+            bloom = BloomFilter(bloom_table, self.bloom_hash_count)
         sketch = CountMinSketch(self.cm_width, self.cm_depth, sketch_table)
         arr = np.zeros(self.feature_map_size, dtype=int)
         for i in range(self.feature_map_size):
-            if bloom.check(i):
+            if bloom_table is None or bloom.check(i):
                 arr[i] = sketch.query(i)
         return arr
 
-    def bloomier_undo(self, bloomier_table: np.ndarray):
+    def bloomier_undo(
+            self,
+            table1: bitarray,
+            table2: np.ndarray | None,
+            max_val: int,
+            hash_seed: int
+    ) -> np.ndarray:
+        t1 = []
+        for i in range(0, len(table1), self.bloomier_bits_per_slot):
+            t1.append(table1[i : i + self.bloomier_bits_per_slot])
+        t2 = table2.tolist() if self.bloomier_second_table else None
         bloomier = BloomierFilter(m=self.bloomier_num_slots,
                                   k=self.bloomier_hash_count,
                                   q=self.bloomier_bits_per_slot,
-                                  table=bloomier_table)
+                                  second_table=self.bloomier_second_table,
+                                  table1=t1,
+                                  table2=t2,
+                                  max_val=max_val,
+                                  hash_seed=hash_seed)
         arr = np.zeros(self.feature_map_size, dtype=int)
         for i in range(self.feature_map_size):
-            val = bloomier.query(i, self.feature_map_max_val)
+            val = bloomier.query(i)
             if val is not None:
                 arr[i] = val
         return arr
@@ -163,8 +192,9 @@ class FeatureMapDecompressor(FeatureMapCompressorBase):
         self.pos = 0
 
 
-decompressor = FeatureMapDecompressor()
-decompressor.decompress_image('compressed', 'decompressed.npy', 'log_decompressor.txt')
-with open('decompressed.txt', 'w') as f:
-    np.set_printoptions(threshold=np.inf)
-    f.write(str(np.load('decompressed.npy').tolist()))
+if __name__ == '__main__':
+    decompressor = FeatureMapDecompressor()
+    decompressor.decompress_image('compressed', 'decompressed.npy', 'log_decompressor.txt')
+    with open('decompressed.txt', 'w') as f:
+        np.set_printoptions(threshold=np.inf)
+        f.write(str(np.load('decompressed.npy').tolist()))
