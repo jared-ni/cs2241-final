@@ -190,4 +190,3 @@ class FeatureMapDecompressor(FeatureMapCompressorBase):
     def set_file(self, bits: bitarray):
         self.compressed_bitarray = bits
         self.pos = 0
-

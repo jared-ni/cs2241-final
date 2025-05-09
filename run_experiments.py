@@ -7,52 +7,59 @@ if __name__ == "__main__":
     # generate compressed feature maps for the count-min sketch
     compressor = FeatureMapCompressor(
         feature_map_options=FeatureMapOptions(shape=(4096,)),
-        quantization_options=QuantizationOptions(quantization_bits=8),
-        count_min_options=CountMinOptions(bloom_fpp=0.01, cm_epsilon=0.01, cm_delta=0.001),
+        quantization_options=QuantizationOptions(quantization_bits=4),
+        count_min_options=CountMinOptions(bloom_fpp=0.1, cm_epsilon=0.1, cm_delta=0.1),
         # bloomier_options=BloomierOptions(fpp=0.01, slots_per_key=1.3, hash_count=3),
         huffman_options=HuffmanOptions(symbol_size=4),
     )
     decompressor = FeatureMapDecompressor()
 
     current_directory = os.path.dirname(os.path.abspath(__file__))
-    base_directory = os.path.join(current_directory, 'experiments', 'kaggle', 'feature_vectors_5k') 
+    base_directory = os.path.join(current_directory, 'experiments', 'kaggle-animals10', 'feature_vectors-animals10') 
     total_files_processed = 0
 
-    output_directory = os.path.join(current_directory, 'experiments', '_5k')
+    output_directory = os.path.join(current_directory, 'experiments', 'kaggle-animals10', 'animals10_4bit-quant_count-min_01_01_01')
 
+    animals = {'cane': 0, 'cavallo': 1, 'elefante': 2, 'farfalla': 3, 'gallina': 4, 'gatto': 5, 
+             'mucca': 6, 'pecora': 7, 'ragno': 8, 'scoiattolo': 9}
+    
     # create the output directory if it doesn't exist
+    if not os.path.exists(output_directory):
+        os.makedirs(output_directory)
     if not os.path.exists(f"{output_directory}/compressed"):
         os.makedirs(f"{output_directory}/compressed")
 
         os.makedirs(f"{output_directory}/compressed/test")
-        os.makedirs(f"{output_directory}/compressed/test/Dog")
-        os.makedirs(f"{output_directory}/compressed/test/Cat")
+        for animal in animals:
+            os.makedirs(f"{output_directory}/compressed/test/{animal}")
 
         os.makedirs(f"{output_directory}/compressed/train")
-        os.makedirs(f"{output_directory}/compressed/train/Dog")
-        os.makedirs(f"{output_directory}/compressed/train/Cat")
+        for animal in animals:
+            os.makedirs(f"{output_directory}/compressed/train/{animal}")
 
         os.makedirs(f"{output_directory}/compressed/val")
-        os.makedirs(f"{output_directory}/compressed/val/Dog")
-        os.makedirs(f"{output_directory}/compressed/val/Cat")
+        for animal in animals:
+            os.makedirs(f"{output_directory}/compressed/val/{animal}")
+
     if not os.path.exists(f"{output_directory}/decompressed"):
         os.makedirs(f"{output_directory}/decompressed")
 
         os.makedirs(f"{output_directory}/decompressed/test")
-        os.makedirs(f"{output_directory}/decompressed/test/Dog")
-        os.makedirs(f"{output_directory}/decompressed/test/Cat")
-
+        for animal in animals:
+            os.makedirs(f"{output_directory}/decompressed/test/{animal}")
+        
         os.makedirs(f"{output_directory}/decompressed/train")
-        os.makedirs(f"{output_directory}/decompressed/train/Dog")
-        os.makedirs(f"{output_directory}/decompressed/train/Cat")
+        for animal in animals:
+            os.makedirs(f"{output_directory}/decompressed/train/{animal}")
 
         os.makedirs(f"{output_directory}/decompressed/val")
-        os.makedirs(f"{output_directory}/decompressed/val/Dog")
-        os.makedirs(f"{output_directory}/decompressed/val/Cat")
+        for animal in animals:
+            os.makedirs(f"{output_directory}/decompressed/val/{animal}")
     
 
     for split in ['test', 'train', 'val']:
-        for class_name in ['Cat', 'Dog']:
+        # for class_name in ['Cat', 'Dog']:
+        for class_name in animals.keys():
             # iterate through the files in the directory
             # for file in os.listdir(base_directory + '/' + split + '/' + class_name):
             for file in os.listdir(os.path.join(base_directory, split, class_name)):
