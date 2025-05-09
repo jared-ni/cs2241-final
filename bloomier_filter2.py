@@ -234,7 +234,7 @@ class BloomierFilter:
 
 if __name__ == "__main__":
     # Example usage
-    bloomier = BloomierFilter(m=20, k=4, q_val=8)
+    bloomier = BloomierFilter(m=20, k=4, q_val=8, q_l=5)
     assignments = {0: 30, 1: 41, 2: 59, 3: 123}
     # assignments = {0: 42, 1: 99, 2: 123, 3: 253}
     bloomier.build(assignments)
