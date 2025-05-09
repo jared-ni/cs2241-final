@@ -89,7 +89,7 @@ class FeatureMapCompressor(FeatureMapCompressorBase):
             self.write(self.cm_depth, int2ba, 8, msg='Count Min depth: ')
         if self.do_bloomier:
             self.write(self.bloomier_hash_count, int2ba, 8, msg='Bloomier hash count: ')
-            self.write(self.bloomier_second_table, int2ba, 8, msg='Bloomier second table? ')
+            self.write(int(self.bloomier_second_table), int2ba, 8, msg='Bloomier second table? ')
         self.log_write()
 
         # Get indices and values of the nonzero entries in feature map
@@ -282,14 +282,3 @@ class FeatureMapCompressor(FeatureMapCompressorBase):
     
     def clear_file(self):
         self.compressed_bitarray.clear()
-
-
-if __name__ == '__main__':
-    compressor = FeatureMapCompressor(
-        feature_map_options=FeatureMapOptions(shape=(1,4096)),
-        quantization_options=QuantizationOptions(quantization_bits=4),
-        # count_min_options=CountMinOptions(bloom_fpp=0.01, cm_epsilon=0.01, cm_delta=0.001),
-        # bloomier_options=BloomierOptions(fpp=0.2, slots_per_key=1.3, hash_count=3, second_table=False),
-        huffman_options=HuffmanOptions(symbol_size=4),
-    )
-    compressor.compress_feature_map('feature_vector_nparray_4096.npy', 'compressed', 'log_compressor.txt')

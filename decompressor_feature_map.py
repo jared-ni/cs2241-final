@@ -191,10 +191,3 @@ class FeatureMapDecompressor(FeatureMapCompressorBase):
         self.compressed_bitarray = bits
         self.pos = 0
 
-
-if __name__ == '__main__':
-    decompressor = FeatureMapDecompressor()
-    decompressor.decompress_image('compressed', 'decompressed.npy', 'log_decompressor.txt')
-    with open('decompressed.txt', 'w') as f:
-        np.set_printoptions(threshold=np.inf)
-        f.write(str(np.load('decompressed.npy').tolist()))
