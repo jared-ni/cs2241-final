@@ -6,7 +6,7 @@ from bloom import BloomFilter
 from count_min_sketch import CountMinSketch
 from options_feature_map import *
 import heapq
-from collections import Counter, namedtuple
+from collections import Counter
 from bloomier_filter import BloomierFilter
 from typing import Any, Callable
 
@@ -125,11 +125,14 @@ class FeatureMapCompressor(FeatureMapCompressorBase):
         
         # Dictionary of nonzero elements
         else:
-            num_elts = len(values)
-            idx_num_bits = int(np.ceil(np.log2(indices.max()+1)))
+            num_elts = values.shape[0]
+            deltas = np.ndarray(indices.shape, int)
+            deltas[0] = indices[0]
+            deltas[1:] = np.diff(indices)
+            delta_num_bits = int(np.ceil(np.log2(deltas.max()+1)))
             self.write(num_elts, int2ba, 32, msg='Number of nonzero elements: ')
-            self.write(idx_num_bits, int2ba, 8, msg='Bits to store each index: ')
-            self.write(indices, intarr2ba, idx_num_bits, msg='\nIndices of nonzero elments:\n')
+            self.write(delta_num_bits, int2ba, 8, msg='Bits to store each delta-encoded index: ')
+            self.write(deltas, intarr2ba, delta_num_bits, msg='\nDelta-encoded indices of nonzero elments:\n')
             self.write(values, intarr2ba, self.quantization_bits, msg='\nValues of nonzero elments:\n')
 
         self.log_write('\n\n----------------------------------------------------------------\n')
@@ -284,9 +287,9 @@ class FeatureMapCompressor(FeatureMapCompressorBase):
 if __name__ == '__main__':
     compressor = FeatureMapCompressor(
         feature_map_options=FeatureMapOptions(shape=(1,4096)),
-        quantization_options=QuantizationOptions(quantization_bits=8),
+        quantization_options=QuantizationOptions(quantization_bits=4),
         # count_min_options=CountMinOptions(bloom_fpp=0.01, cm_epsilon=0.01, cm_delta=0.001),
-        bloomier_options=BloomierOptions(fpp=0.05, slots_per_key=1.3, hash_count=3, second_table=False),
-        # huffman_options=HuffmanOptions(symbol_size=4),
+        # bloomier_options=BloomierOptions(fpp=0.2, slots_per_key=1.3, hash_count=3, second_table=False),
+        huffman_options=HuffmanOptions(symbol_size=4),
     )
     compressor.compress_feature_map('feature_vector_nparray_4096.npy', 'compressed', 'log_compressor.txt')

@@ -19,13 +19,11 @@ class BloomierFilter:
             hash_seed: int | None = None,
     ):
         """
-        Immutable Bloomier Filter.
-
         Args:
             m (int): Number of table slots
             k (int): Number of hash functions
             q (int): Number of bits per slot (bitwidth)
-            second_table (bool): Whether to use a second table (mutable Bloom filter)
+            second_table (bool): Whether to use a second table (for a mutable Bloomier filter)
             max_val (int): Maximum value stored in first table
             table1, table2 (optional np.ndarrays): Load from existing tables
             hash_seed (optional int): Provide seed for hash functions when loading from existing table
@@ -116,7 +114,7 @@ class BloomierFilter:
 
     def create(self, assignments: Dict[int, int]) -> None:
         """
-        Build the immutable Bloomier filter.
+        Build the Bloomier filter.
         Args:
             assignments: Dictionary mapping keys to their values
         """

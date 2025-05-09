@@ -1,5 +1,4 @@
 import numpy as np
-from PIL import Image
 from bitarray import bitarray
 from helper import *
 from bloom import BloomFilter
@@ -90,11 +89,12 @@ class FeatureMapDecompressor(FeatureMapCompressorBase):
         # Dictionary of nonzero elements
         else:
             num_elts = self.read(32, ba2int, msg='Number of nonzero elements: ')
-            idx_num_bits = self.read(8, ba2int, msg='Bits to store each index: ')
-            indices = self.read(num_elts*idx_num_bits, ba2intarr, idx_num_bits,
-                                msg='\nIndices of nonzero elments:\n')
+            delta_num_bits = self.read(8, ba2int, msg='Bits to store each delta-encoded index: ')
+            deltas = self.read(num_elts*delta_num_bits, ba2intarr, delta_num_bits,
+                               msg='\nDelta-encoded indices of nonzero elments:\n')
             values = self.read(num_elts*self.quantization_bits, ba2intarr, self.quantization_bits,
                                msg='\nValues of nonzero elments:\n')
+            indices = deltas.cumsum()
             arr = np.zeros(self.feature_map_size)
             arr[indices] = values
 
