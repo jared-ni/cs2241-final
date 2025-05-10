@@ -15,7 +15,7 @@ class QuantizationOptions:
 
     def validate(self):
         assert isinstance(self.quantization_bits, int)
-        assert 1 <= self.quantization_bits and self.quantization_bits <= 8
+        assert 1 <= self.quantization_bits and self.quantization_bits <= 16
 
 
 @dataclass

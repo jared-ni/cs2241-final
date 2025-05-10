@@ -182,7 +182,7 @@ class FeatureMapCompressor(FeatureMapCompressorBase):
         # Bloom filter to store the nonzero indices
         if self.bloom_hash_count > 0:
             num_vals = values.shape[0]
-            size = round(num_vals * self.bloom_bits_per_element)
+            size = min(round(num_vals * self.bloom_bits_per_element), 65535)
             bloom = BloomFilter(size, self.bloom_hash_count)
             for idx in indices:
                 bloom.add(idx)
